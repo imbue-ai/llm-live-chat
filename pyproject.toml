@@ -1,0 +1,22 @@
+[project]
+name = "llm-live-chat"
+version = "0.0.1"
+description = "Use LLM to chat in your terminal and recieve async responses"
+readme = "README.md"
+authors = [{name = "Josh Albrecht"}]
+license = {text = "Apache-2.0"}
+classifiers = [
+    "License :: OSI Approved :: Apache Software License"
+]
+dependencies = [
+    "llm",
+]
+
+[project.urls]
+Homepage = "https://github.com/imbue-ai/llm-live-chat"
+
+[project.entry-points.llm]
+cmd = "llm_live_chat"
+
+[project.optional-dependencies]
+test = ["pytest"]
