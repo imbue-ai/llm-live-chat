@@ -156,6 +156,7 @@ def register_commands(cli):
         processes via SIGUSR1. Use 'llm inject' to send messages into a
         running live-chat session.
         """
+        import datetime
         import os
         import pathlib
         import pydantic
@@ -190,6 +191,7 @@ def register_commands(cli):
         _debug_tool_call = ci["_debug_tool_call"]
         _approve_tool_call = ci["_approve_tool_call"]
         migrate = ci["migrate"]
+        monotonic_ulid = ci["monotonic_ulid"]
 
         if sys.platform != "win32":
             readline.parse_and_bind("\\e[D: backward-char")
@@ -497,6 +499,41 @@ def register_commands(cli):
                 if prompt.strip() in ("exit", "quit"):
                     break
 
+                # Save conversation and user message before streaming
+                # so they survive if the process is interrupted.
+                db["conversations"].insert(
+                    {
+                        "id": conversation.id,
+                        "name": (prompt or "")[:100],
+                        "model": model.model_id,
+                    },
+                    ignore=True,
+                )
+                _preliminary_id = str(monotonic_ulid()).lower()
+                seen_response_ids.add(_preliminary_id)
+                db["responses"].insert(
+                    {
+                        "id": _preliminary_id,
+                        "model": model.model_id,
+                        "prompt": prompt,
+                        "system": None,
+                        "prompt_json": None,
+                        "options_json": "{}",
+                        "response": "",
+                        "response_json": None,
+                        "conversation_id": conversation.id,
+                        "duration_ms": 0,
+                        "datetime_utc": datetime.datetime.now(
+                            datetime.timezone.utc
+                        ).isoformat(),
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "token_details": None,
+                        "schema_id": None,
+                        "resolved_model": None,
+                    },
+                )
+
                 prev_count = len(conversation.responses)
                 response = conversation.chain(
                     prompt,
@@ -516,6 +553,8 @@ def register_commands(cli):
                 response.log_to_db(db)
                 for r in conversation.responses[prev_count:]:
                     seen_response_ids.add(r.id)
+                db["responses"].delete(_preliminary_id)
+                seen_response_ids.discard(_preliminary_id)
                 _in_streaming = False
                 if _has_sigusr1 and _check_pending:
                     _display_new_responses()
