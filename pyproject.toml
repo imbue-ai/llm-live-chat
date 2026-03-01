@@ -1,6 +1,6 @@
 [project]
 name = "llm-live-chat"
-version = "0.0.1"
+version = "0.0.2"
 description = "Use LLM to chat in your terminal and receive async responses"
 readme = "README.md"
 authors = [{name = "Josh Albrecht"}]
