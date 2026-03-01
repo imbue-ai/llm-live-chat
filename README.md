@@ -1,58 +1,70 @@
 # llm-live-chat
 
-[![PyPI](https://img.shields.io/pypi/v/llm-cmd.svg)](https://pypi.org/project/llm-cmd/)
-[![Changelog](https://img.shields.io/github/v/release/simonw/llm-cmd?include_prereleases&label=changelog)](https://github.com/simonw/llm-cmd/releases)
-[![Tests](https://github.com/simonw/llm-cmd/actions/workflows/test.yml/badge.svg)](https://github.com/simonw/llm-cmd/actions/workflows/test.yml)
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/simonw/llm-cmd/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/llm-live-chat.svg)](https://pypi.org/project/llm-live-chat/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/imbue-ai/llm-live-chat/blob/main/LICENSE)
 
-Use LLM to generate and execute commands in your shell
-
-For background on this project see [llm cmd undo last git commit—a new plugin for LLM](https://simonwillison.net/2024/Mar/26/llm-cmd/)
+An [LLM](https://llm.datasette.io/) plugin that provides an interactive chat with support for live message injection from external processes.
 
 ## Installation
 
 Install this plugin in the same environment as [LLM](https://llm.datasette.io/).
 ```bash
-llm install llm-cmd
+llm install llm-live-chat
 ```
+
 ## Usage
 
-This command could be **very dangerous**. Do not use this unless you are confident you understand what it does and are sure you could spot if it is likely to do something dangerous.
+### live-chat
 
-Run `llm cmd` like this:
+Start an interactive chat session:
 
 ```bash
-llm cmd undo last git commit
+llm live-chat
 ```
-It will use your [default model](https://llm.datasette.io/en/stable/setup.html#setting-a-custom-default-model) to generate the corresponding shell command.
 
-This will then be displayed in your terminal ready for you to edit it, or hit `<enter>` to execute the prompt.
+This works like `llm chat` but supports live message injection from external processes via SIGUSR1. The session displays its PID and conversation ID on startup so other processes can inject messages into the running conversation.
 
-If the command doesnt't look right, hit `Ctrl+C` to cancel.
+Options:
 
-## The system prompt
+- `-m MODEL` — Model to use
+- `-s SYSTEM` — System prompt
+- `-c` / `--continue` — Continue the most recent conversation
+- `--cid ID` — Continue a specific conversation by ID
+- `--show-history` — Display previous messages when continuing a conversation
+- `-T TOOL` — Make a tool available to the model
+- `-t TEMPLATE` — Use a template
+- `-o KEY VALUE` — Model options
 
-This is the prompt used by this tool:
+### inject
 
-> Return only the command to be executed as a raw string, no string delimiters
-wrapping it, no yapping, no markdown, no fenced code blocks, what you return
-will be passed to subprocess.check_output() directly.
->
-> For example, if the user asks: undo last git commit
->
-> You return only: git reset --soft HEAD~1
+Inject a message into a conversation's database:
+
+```bash
+llm inject "Your message here" --cid CONVERSATION_ID
+```
+
+If `--cid` is given, the message is injected into that conversation and SIGUSR1 is sent to all running `llm live-chat` processes so they pick it up immediately.
+
+If no `--cid` is given, a new conversation is created.
+
+Options:
+
+- `--cid ID` — Conversation ID to inject into
+- `--prompt TEXT` — User message to pair with the injected response (default: "...")
+- `-m MODEL` — Model name for new conversations
+- `-d DATABASE` — Path to log database
 
 ## Development
 
 To set up this plugin locally, first checkout the code. Then create a new virtual environment:
 ```bash
-cd llm-cmd
+cd llm-live-chat
 python3 -m venv venv
 source venv/bin/activate
 ```
 Now install the dependencies and test dependencies:
 ```bash
-llm install -e '.[test]'
+pip install -e '.[test]'
 ```
 To run the tests:
 ```bash

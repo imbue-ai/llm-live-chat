@@ -5,20 +5,120 @@ import sys
 sys._called_from_test = True
 
 import pytest
-from tests.conftest import (  # noqa: F401
-    embed_demo,
-    env_setup,
-    logs_db,
-    mock_model,
-    async_mock_model,
-    register_embed_demo_model,
-    register_echo_model,
-    user_path,
-)
+import sqlite_utils
+import llm
+from llm.plugins import pm
+from pydantic import Field
+from typing import Optional
 
 import llm.cli
 import llm_live_chat
-from llm.plugins import pm
+
+
+@pytest.fixture
+def user_path(tmpdir):
+    dir = tmpdir / "llm.datasette.io"
+    dir.mkdir()
+    return dir
+
+
+@pytest.fixture(autouse=True)
+def env_setup(monkeypatch, user_path):
+    monkeypatch.setenv("LLM_USER_PATH", str(user_path))
+
+
+@pytest.fixture
+def logs_db(user_path):
+    return sqlite_utils.Database(str(user_path / "logs.db"))
+
+
+class MockModel(llm.Model):
+    model_id = "mock"
+    attachment_types = {"image/png", "audio/wav"}
+    supports_schema = True
+    supports_tools = True
+
+    class Options(llm.Options):
+        max_tokens: Optional[int] = Field(
+            description="Maximum number of tokens to generate.", default=None
+        )
+
+    def __init__(self):
+        self.history = []
+        self._queue = []
+        self.resolved_model_name = None
+
+    def enqueue(self, messages):
+        assert isinstance(messages, list)
+        self._queue.append(messages)
+
+    def execute(self, prompt, stream, response, conversation):
+        self.history.append((prompt, stream, response, conversation))
+        gathered = []
+        while True:
+            try:
+                messages = self._queue.pop(0)
+                for message in messages:
+                    gathered.append(message)
+                    yield message
+                break
+            except IndexError:
+                break
+        response.set_usage(
+            input=len((prompt.prompt or "").split()), output=len(gathered)
+        )
+        if self.resolved_model_name is not None:
+            response.set_resolved_model(self.resolved_model_name)
+
+
+class EmbedDemo(llm.EmbeddingModel):
+    model_id = "embed-demo"
+    batch_size = 10
+    supports_binary = True
+
+    def __init__(self):
+        self.embedded_content = []
+
+    def embed_batch(self, texts):
+        if not hasattr(self, "batch_count"):
+            self.batch_count = 0
+        self.batch_count += 1
+        for text in texts:
+            self.embedded_content.append(text)
+            words = text.split()[:16]
+            embedding = [len(word) for word in words]
+            embedding += [0] * (16 - len(embedding))
+            yield embedding
+
+
+@pytest.fixture
+def embed_demo():
+    return EmbedDemo()
+
+
+@pytest.fixture
+def mock_model():
+    return MockModel()
+
+
+@pytest.fixture(autouse=True)
+def register_embed_demo_model(embed_demo, mock_model):
+    class MockModelsPlugin:
+        __name__ = "MockModelsPlugin"
+
+        @llm.hookimpl
+        def register_embedding_models(self, register):
+            register(embed_demo)
+
+        @llm.hookimpl
+        def register_models(self, register):
+            register(mock_model)
+
+    pm.register(MockModelsPlugin(), name="undo-mock-models-plugin")
+    try:
+        yield
+    finally:
+        pm.unregister(name="undo-mock-models-plugin")
 
 
 @pytest.fixture(autouse=True)
