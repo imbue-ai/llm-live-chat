@@ -127,6 +127,7 @@ def register_commands(cli):
         is_flag=True,
         help="Display previous messages when continuing a conversation",
     )
+    @click.argument("initial_message", required=False, default=None)
     def live_chat(
         system,
         model_id,
@@ -146,6 +147,7 @@ def register_commands(cli):
         tools_approve,
         chain_limit,
         show_history,
+        initial_message,
     ):
         """
         Hold an ongoing chat with a model.
@@ -315,6 +317,19 @@ def register_commands(cli):
         _in_streaming = False
         seen_response_ids = set()
 
+        # Check for unanswered user messages on resume
+        _next_prompt = initial_message
+        if conversation and conversation.responses:
+            stale = [r for r in conversation.responses if not r.text()]
+            for r in stale:
+                conversation.responses.remove(r)
+                try:
+                    db["responses"].delete(r.id)
+                except Exception:
+                    pass
+            if stale and _next_prompt is None:
+                _next_prompt = stale[-1].prompt._prompt
+
         if _has_sigusr1:
             click.echo(
                 "PID: {} | Conversation: {}".format(
@@ -400,9 +415,14 @@ def register_commands(cli):
                 # Display any pending messages before the next prompt
                 if _has_sigusr1 and _check_pending:
                     _display_new_responses()
-                prompt = click.prompt(
-                    "", prompt_suffix="> " if not in_multi else ""
-                )
+                if _next_prompt is not None:
+                    prompt = _next_prompt
+                    _next_prompt = None
+                    click.echo("> " + prompt)
+                else:
+                    prompt = click.prompt(
+                        "", prompt_suffix="> " if not in_multi else ""
+                    )
                 fragments = []
                 attachments = []
                 if argument_fragments:

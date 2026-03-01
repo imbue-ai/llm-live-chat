@@ -348,3 +348,89 @@ def test_show_history_with_injected(mock_model, logs_db):
     assert "reply" in result.output
     assert "> Agent" in result.output
     assert "injected followup" in result.output
+
+
+@pytest.mark.xfail(sys.platform == "win32", reason="Expected to fail on Windows")
+def test_initial_message(mock_model, logs_db):
+    """Initial message argument is sent immediately without prompting."""
+    runner = CliRunner()
+    mock_model.enqueue(["hello back"])
+    result = runner.invoke(
+        llm.cli.cli,
+        ["live-chat", "-m", "mock", "Hello there"],
+        input="quit\n",
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert "> Hello there" in result.output
+    assert "hello back" in result.output
+
+    responses = list(logs_db["responses"].rows)
+    assert len(responses) == 1
+    assert responses[0]["prompt"] == "Hello there"
+    assert responses[0]["response"] == "hello back"
+
+
+@pytest.mark.xfail(sys.platform == "win32", reason="Expected to fail on Windows")
+def test_resume_unanswered_message(mock_model, logs_db):
+    """Resuming a conversation where last response has empty text resends it."""
+    runner = CliRunner()
+
+    # Start a conversation normally
+    mock_model.enqueue(["first reply"])
+    runner.invoke(
+        llm.cli.cli,
+        ["live-chat", "-m", "mock"],
+        input="Hello\nquit\n",
+        catch_exceptions=False,
+    )
+    conv_id = list(logs_db["conversations"].rows)[0]["id"]
+
+    # Simulate an unanswered message (e.g. from inject or a crash)
+    from llm.utils import monotonic_ulid
+
+    unanswered_id = str(monotonic_ulid()).lower()
+    now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    logs_db["responses"].insert(
+        {
+            "id": unanswered_id,
+            "model": "mock",
+            "prompt": "Unsent message",
+            "system": None,
+            "prompt_json": None,
+            "options_json": "{}",
+            "response": "",
+            "response_json": None,
+            "conversation_id": conv_id,
+            "duration_ms": 0,
+            "datetime_utc": now_utc,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "token_details": None,
+            "schema_id": None,
+            "resolved_model": None,
+        },
+    )
+
+    # Resume — should detect the unanswered message and resend it
+    mock_model.enqueue(["resent reply"])
+    result = runner.invoke(
+        llm.cli.cli,
+        ["live-chat", "-m", "mock", "-c"],
+        input="quit\n",
+        catch_exceptions=False,
+    )
+    assert result.exit_code == 0
+    assert "> Unsent message" in result.output
+    assert "resent reply" in result.output
+
+    # The unanswered row should be cleaned up, and the real response saved
+    responses = list(
+        logs_db["responses"].rows_where(
+            "conversation_id = ?", [conv_id], order_by="datetime_utc"
+        )
+    )
+    response_texts = [r["response"] for r in responses]
+    assert "first reply" in response_texts
+    assert "resent reply" in response_texts
+    assert "" not in response_texts
